@@ -196,13 +196,27 @@ def get_backup_filenames():
   return res
 
 S3_KEY_PREFIX = 'db_3/'
+
+#改为断点续传模式，服务器下载的时候老是下载中断
 def s3_download(s3_bucket, s3_object_key, local_file_name):
   s3_object_key = S3_KEY_PREFIX + s3_object_key
   meta_data = s3client.head_object(Bucket=s3_bucket, Key=s3_object_key)
   total_length = int(meta_data.get('ContentLength', 0))
+    # Check if the local file exists
+  if os.path.exists(local_file_name):
+        local_file_size = os.path.getsize(local_file_name)
+  else:
+        local_file_size = 0
+  range_start = local_file_size
+  range_header = f'bytes={range_start}-'
+  total_length -= range_start
+
   with tqdm(total=total_length,  desc=f'source: s3://{s3_bucket}/{s3_object_key}', bar_format="{percentage:.1f}%|{bar:25} | {rate_fmt} | {desc}",  unit='B', unit_scale=True, unit_divisor=1024) as pbar:
     with open(local_file_name, 'wb') as f:
-      s3client.download_fileobj(s3_bucket, s3_object_key, f, Callback=pbar.update)
+      response = s3client.get_object(Bucket=s3_bucket, Key=s3_object_key, Range=range_header)
+      for chunk in response['Body'].iter_chunks():
+        f.write(chunk)
+        pbar.update(len(chunk))
 
 backup_filenames = get_backup_filenames()
 index_backup_heights = []
